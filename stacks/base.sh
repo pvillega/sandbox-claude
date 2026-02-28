@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stacks/base.sh — Core golden image: Docker, Node, Claude Code, Python 3, dev tools
+# stacks/base.sh — Core golden image: Docker, Claude Code, Python 3, dev tools
 # Usage: called by sandbox-setup, runs INSIDE the Incus container via incus exec
 set -e
 export DEBIAN_FRONTEND=noninteractive
@@ -22,12 +22,10 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.
 apt-get update
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-# Node.js 22 LTS (via NodeSource)
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-apt-get install -y nodejs
-
-# Claude Code
-npm install -g @anthropic-ai/claude-code
+# Claude Code (native installer — self-contained, no Node.js needed)
+curl -fsSL https://claude.ai/install.sh | bash
+# Ensure claude is on PATH for non-interactive shells (incus exec)
+ln -sf /root/.local/bin/claude /usr/local/bin/claude
 
 # SSH config — key-based auth only (host key injected by sandbox-create)
 mkdir -p /run/sshd /root/.ssh

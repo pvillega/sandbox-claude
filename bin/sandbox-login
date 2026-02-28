@@ -13,15 +13,21 @@ require_sandbox
 STATE=$(vm_exec "incus info ${CONTAINER} 2>/dev/null | grep 'Status:' | awk '{print \$2}'" || true)
 [[ "$STATE" == "RUNNING" ]] || die "Container '${CONTAINER}' is not running (state: ${STATE:-not found})"
 
+# Ensure Claude Code is up to date
+info "Updating Claude Code to latest version..."
+vm_run incus exec "${CONTAINER}" -- claude update 2>&1 | tail -1
+
 info "Starting Claude login flow for '${CONTAINER}'..."
 echo ""
 echo "This will open a browser-based OAuth flow."
-echo "Complete the authentication in your browser when prompted."
+echo "The browser will NOT auto-open inside the container."
+echo "Copy the URL shown below and open it in your host browser."
 echo ""
 
-# Run claude login interactively inside the container
-vm_run incus exec "${CONTAINER}" -- bash -c \
-  "claude login"
+# Start claude interactively — triggers OAuth automatically if not authenticated.
+# The user can paste the auth code back into the interactive prompt.
+# Use /login inside the session if re-authentication is needed.
+vm_run incus exec "${CONTAINER}" -- claude
 
 # Verify success
 if vm_exec "incus exec ${CONTAINER} -- bash -c 'ls /root/.claude/.credentials* 2>/dev/null || ls /root/.claude/auth* 2>/dev/null'" &>/dev/null; then

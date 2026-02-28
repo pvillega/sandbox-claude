@@ -97,10 +97,10 @@ Linux path:
 
 ```
 Golden images (shared across both platforms):
-  +-- golden-base/ready     (Docker, Node 22, Claude Code, SSH, git, Python 3)
+  +-- golden-base/ready     (Docker, Claude Code, SSH, git, Python 3)
   +-- golden-rust/ready     (base + Rust toolchain + quality tools)
   +-- golden-python/ready   (base + Poetry, uv, ruff, mypy, etc.)
-  +-- golden-node/ready     (base + pnpm, yarn, bun, eslint, etc.)
+  +-- golden-node/ready     (base + Node.js 22, npm, pnpm, yarn, bun, eslint, etc.)
   +-- golden-go/ready       (base + Go, golangci-lint, govulncheck)
   +-- golden-dotnet/ready   (base + .NET SDK, dotnet tools)
 
@@ -540,10 +540,10 @@ Golden images are pre-built container snapshots with all tooling installed. Crea
 
 | Stack | Image Name | Includes | Quality/Coverage Tools |
 |---|---|---|---|
-| **base** | `golden-base` | Docker CE + docker-compose-plugin, Node.js 22 LTS + npm, Claude Code (npm global), Python 3 + pip + venv, git, tmux, openssh-server, ripgrep, jq, htop, wget, unzip, build-essential, ca-certificates | -- |
+| **base** | `golden-base` | Docker CE + docker-compose-plugin, Claude Code (native binary), Python 3 + pip + venv, git, tmux, openssh-server, ripgrep, jq, htop, wget, unzip, build-essential, ca-certificates | -- |
 | **rust** | `golden-rust` | Everything in base + Rust stable toolchain via rustup | clippy (linting), rustfmt (formatting), cargo-tarpaulin (coverage), cargo-audit (security) |
 | **python** | `golden-python` | Everything in base + Poetry, uv | ruff (linting + formatting), mypy (type checking), bandit (security), coverage (code coverage) |
-| **node** | `golden-node` | Everything in base + pnpm, yarn, bun | c8 (V8-native coverage), eslint (linting), prettier (formatting) |
+| **node** | `golden-node` | Everything in base + Node.js 22 LTS, npm, pnpm, yarn, bun | c8 (V8-native coverage), eslint (linting), prettier (formatting) |
 | **go** | `golden-go` | Everything in base + Go latest stable | golangci-lint (meta-linter), govulncheck (security), `go tool cover` (built-in coverage) |
 | **dotnet** | `golden-dotnet` | Everything in base + .NET SDK (latest LTS) | dotnet-coverage (coverage), `dotnet format` (built-in formatting), dotnet-sonarscanner (quality analysis), security analyzers via NuGet |
 
@@ -982,6 +982,18 @@ ip -4 route show default
 sudo ip route add default via <gateway-ip> dev <interface>
 ```
 
+## Testing
+
+The project includes a test suite with unit tests for pure functions and integration tests that validate security properties (egress filtering, container isolation, port forwarding) using real Incus containers.
+
+See [`tests/README.md`](tests/README.md) for prerequisites and how to run the tests.
+
+```bash
+./tests/run-tests.sh unit         # Fast unit tests (~1s)
+./tests/run-tests.sh integration  # Integration tests with real containers (~2-5min)
+./tests/run-tests.sh              # Both
+```
+
 ## Project Structure
 
 ```
@@ -1007,6 +1019,12 @@ sandbox-claude/
 |   +-- node.sh              # Node additions
 |   +-- go.sh                # Go additions
 |   +-- dotnet.sh            # .NET additions
++-- tests/
+|   +-- run-tests.sh          # Test runner (unit, integration, or all)
+|   +-- unit/                 # Fast tests for pure functions
+|   +-- integration/          # Tests using real Incus containers
+|   +-- fixtures/             # Test data (domain allowlists, etc.)
+|   +-- test_helper/          # Shared BATS helpers
 +-- install.sh               # Symlinks bin/* into ~/.local/bin
 +-- .gitignore
 ```

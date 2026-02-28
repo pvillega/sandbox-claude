@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Symlink all bin/sandbox* scripts into a directory in your PATH
+# install.sh — Install wrapper scripts for all bin/sandbox* commands into a directory in your PATH
 set -euo pipefail
 
 DEST="${1:-${HOME}/.local/bin}"
@@ -7,13 +7,26 @@ mkdir -p "$DEST"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/bin" && pwd)"
 
+# Clean up old symlinks from previous installs
+for script in "${SCRIPT_DIR}"/sandbox*; do
+  name="$(basename "$script")"
+  target="${DEST}/${name}"
+  if [[ -L "$target" ]]; then
+    rm "$target"
+  fi
+done
+
 echo "Installing sandbox commands to ${DEST}..."
 echo ""
 
 for script in "${SCRIPT_DIR}"/sandbox*; do
   name="$(basename "$script")"
   chmod +x "$script"
-  ln -sf "$script" "${DEST}/${name}"
+  cat > "${DEST}/${name}" <<EOF
+#!/usr/bin/env bash
+exec "${script}" "\$@"
+EOF
+  chmod +x "${DEST}/${name}"
   echo "  ${name} → ${DEST}/${name}"
 done
 
