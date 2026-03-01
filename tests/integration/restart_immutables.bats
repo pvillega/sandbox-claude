@@ -100,7 +100,8 @@ setup() {
 
 @test "CPU and memory changeable on restart" {
   # Stop first
-  "${PROJECT_ROOT}/bin/sandbox-stop" "$TEST_CONTAINER_NAME"
+  run "${PROJECT_ROOT}/bin/sandbox-stop" "$TEST_CONTAINER_NAME"
+  assert_success
 
   # Restart with new resource limits
   run "${PROJECT_ROOT}/bin/sandbox-start" "$TEST_CONTAINER_NAME" \

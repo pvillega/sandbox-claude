@@ -99,20 +99,21 @@ require_container() {
 }
 
 # ── VM execution abstraction ──────────────────────────────────────
-# vm_run: Execute a command in the sandbox environment.
-#   macOS: runs via 'orb run -m sandbox <args>'
-#   Linux: runs <args> directly on the host
+# vm_run: Execute a command as root in the sandbox VM (exec-style, separate args).
+#   Supports stdin piping and heredocs.
+#   macOS: orb run -m sandbox sudo <args>
+#   Linux: sudo <args>
 vm_run() {
   if [[ "$SANDBOX_PLATFORM" == "macos" ]]; then
-    orb run -m "${SANDBOX_MACHINE}" "$@"
+    orb run -m "${SANDBOX_MACHINE}" sudo "$@"
   else
-    "$@"
+    sudo "$@"
   fi
 }
 
-# vm_exec: Run a bash -c command string in the sandbox environment.
-#   macOS: orb run -m sandbox bash -c "cmd"
-#   Linux: bash -c "cmd"
+# vm_exec: Execute a shell command string as root in the sandbox VM (eval-style).
+#   Use when the command contains pipes, redirects, or chained operators.
+#   Delegates to vm_run, which handles sudo.
 vm_exec() {
   vm_run bash -c "$1"
 }
@@ -366,8 +367,8 @@ inject_env() {
         printf '%s\n' "$line" >> "$tmpfile"
       fi
     done
-    # Push the file directly — no shell interpolation of values
-    vm_run incus file push "$tmpfile" "${container}/etc/profile.d/sandbox-env.sh" --append
+    # Pipe content into container via stdin — no shell interpolation of values
+    vm_run incus exec "${container}" -- bash -c 'cat >> /etc/profile.d/sandbox-env.sh' < "$tmpfile"
     rm -f "$tmpfile"
   fi
 }
@@ -409,7 +410,7 @@ parse_domains_file() {
 
 # Install squid-openssl in the VM if not present
 ensure_squid_installed() {
-  vm_run sudo bash << 'SQUID_INSTALL'
+  vm_run bash << 'SQUID_INSTALL'
 set -e
 if command -v squid &>/dev/null; then
   echo "Squid already installed"
@@ -425,7 +426,7 @@ SQUID_INSTALL
 
 # Write base squid.conf with peek/splice SNI filtering config
 deploy_squid_config() {
-  vm_run sudo bash << 'SQUID_CONF'
+  vm_run bash << 'SQUID_CONF'
 set -e
 
 CONF_DIR="/etc/squid/sandbox"
@@ -508,13 +509,13 @@ setup_container_domain_filter() {
   local parsed_domains
   parsed_domains=$(parse_domains_file "$domains_file")
 
-  vm_run sudo bash -c "
+  vm_exec "
     cat > /etc/squid/sandbox/containers/${container}.domains << 'DOMAINS'
 ${parsed_domains}
 DOMAINS
   "
 
-  vm_run sudo bash -c "
+  vm_exec "
     cat > /etc/squid/sandbox/containers/${container}.conf << ACL_EOF
 acl ${container}_src src ${container_ip}/32
 acl ${container}_domains ssl::server_name \"/etc/squid/sandbox/containers/${container}.domains\"
@@ -522,7 +523,7 @@ ssl_bump splice ${container}_src ${container}_domains
 ACL_EOF
   "
 
-  vm_exec "sudo squid -k reconfigure 2>/dev/null || sudo systemctl reload squid 2>/dev/null || true"
+  vm_exec "squid -k reconfigure 2>/dev/null || systemctl reload squid 2>/dev/null || true"
 }
 
 # Remove per-container Squid ACL and domains file, then reload

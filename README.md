@@ -22,7 +22,7 @@ Run Claude Code agents in fully isolated Incus containers on **macOS** (via OrbS
 # 1. Clone and install
 git clone https://github.com/you/sandbox-claude.git
 cd sandbox-claude
-./install.sh                # Symlinks bin/* into ~/.local/bin
+./install.sh                # Installs wrapper scripts for bin/* into ~/.local/bin
 
 # 2. One-time setup (creates OrbStack VM, installs Incus, builds golden images)
 sandbox-setup               # Takes ~10 minutes the first time
@@ -34,7 +34,7 @@ sandbox-setup               # Takes ~10 minutes the first time
 # 1. Clone and install
 git clone https://github.com/you/sandbox-claude.git
 cd sandbox-claude
-./install.sh                # Symlinks bin/* into ~/.local/bin
+./install.sh                # Installs wrapper scripts for bin/* into ~/.local/bin
 
 # 2. Install Linux prerequisites (requires sudo, then log out/in)
 sudo sandbox-linux-prereqs  # Installs iptables, curl, gpg, git, gh; adds you to incus-admin
@@ -191,7 +191,7 @@ Run `sudo sandbox-linux-prereqs` to install everything in this table automatical
 | `sandbox-list` | List all containers with health status |
 | `sandbox-expose` | Expose additional ports bidirectionally |
 | `sandbox-stop` | Stop and optionally remove a container |
-| `sandbox-nuke` | Destroy all containers and golden images (nuclear option) |
+| `sandbox-nuke` | Destroy all containers, golden images, and OrbStack VM (nuclear option) |
 
 ---
 
@@ -278,7 +278,7 @@ sandbox-start <name> [repo-url] [flags]
 6. Adds Incus proxy devices for SSH, App, and Alt ports
 7. Starts the container
 8. Sets up a dedicated ssh-agent in the sandbox environment (OrbStack VM on macOS, host on Linux) and mounts the socket into the container
-9. Injects environment variables from `~/.sandbox/env` and any `--env` overrides into `/root/.bashrc`
+9. Injects environment variables from `~/.sandbox/env` and any `--env` overrides into `/etc/profile.d/sandbox-env.sh`
 10. If `--restrict-domains` is set: configures Squid SNI filtering, iptables NAT redirect, and QUIC blocking for this container
 11. Clones the repo into `/workspace/project` (with `--branch` if specified)
 12. Stores metadata (stack, repo, slot, restrict-domains) in Incus config for later retrieval
@@ -469,13 +469,13 @@ sandbox-stop proj-alpha --rm
 
 ### sandbox-nuke
 
-Destroy all agent containers and golden images. Requires interactive confirmation.
+Destroy all agent containers, golden images, and the OrbStack VM. Requires interactive confirmation.
 
 ```
 sandbox-nuke
 ```
 
-Destroys all `agent-*` containers, cleans up their deploy keys and ssh-agents, and destroys golden images. Full reset -- run `sandbox-setup` again to rebuild.
+Destroys all `agent-*` containers, cleans up their deploy keys and ssh-agents, destroys golden images, and on macOS deletes the OrbStack VM. Full reset -- run `sandbox-setup` again to rebuild.
 
 Prompts for confirmation by typing `yes`.
 
@@ -560,7 +560,7 @@ GITHUB_TOKEN=ghp_...
 MY_CUSTOM_VAR=some-value
 ```
 
-This file is read by `sandbox-start` and injected into each container's `/root/.bashrc`. Variables persist across container restarts.
+This file is read by `sandbox-start` and injected into each container's `/etc/profile.d/sandbox-env.sh`. Variables persist across container restarts.
 
 #### Per-Container Overrides with `--env`
 
@@ -674,7 +674,7 @@ Or create a project-specific file and pass it with `--domains-file`.
 | Risk | Details |
 |---|---|
 | **VM/Host kernel access** | All containers share the same kernel (OrbStack VM on macOS, host on Linux). A container escape (unlikely but theoretically possible) would give access to the VM (macOS) or host (Linux). On macOS, the VM provides an additional isolation boundary. |
-| **Env var exposure** | Environment variables injected via `~/.sandbox/env` or `--env` are written to `/root/.bashrc` inside the container. An agent can read them. This is by design (agents need API keys to function), but be aware. |
+| **Env var exposure** | Environment variables injected via `~/.sandbox/env` or `--env` are written to `/etc/profile.d/sandbox-env.sh` inside the container. An agent can read them. This is by design (agents need API keys to function), but be aware. |
 | **Deploy key write access** | Deploy keys are created with `-w` (write) access. An agent can push to the repo it was created for. |
 | **HTTPS traffic content** | Without `--restrict-domains`, egress filtering allows all HTTPS traffic — agents can reach any HTTPS endpoint. Use `--restrict-domains` to limit HTTPS egress to an approved domain allowlist (see [Domain-Based Egress Filtering](#domain-based-egress-filtering)). |
 | **Persistent container state** | Stopping a container preserves its filesystem. Anything the agent wrote remains until the container is destroyed with `--rm`. |
@@ -798,10 +798,10 @@ sandbox-start proj-alpha git@github.com:me/alpha.git --stack rust
 sandbox proj-alpha --claude
 
 # Verify auth token exists
-sandbox proj-alpha --cmd "ls -la ~/.claude/"
+sandbox proj-alpha --cmd "ls -la /home/ubuntu/.claude/"
 ```
 
-The auth token is stored inside the container at `~/.claude/` and persists across container restarts. It is lost only when the container is destroyed with `--rm`.
+The auth token is stored inside the container at `/home/ubuntu/.claude/` and persists across container restarts. It is lost only when the container is destroyed with `--rm`.
 
 ### macOS Issues
 
@@ -885,13 +885,15 @@ sandbox-claude/
 |   +-- node.sh              # Node additions
 |   +-- go.sh                # Go additions
 |   +-- dotnet.sh            # .NET additions
+|   +-- unison.sh            # Unison additions
 +-- tests/
+|   +-- README.md             # Test documentation
 |   +-- run-tests.sh          # Test runner (unit, integration, or all)
 |   +-- unit/                 # Fast tests for pure functions
 |   +-- integration/          # Tests using real Incus containers
 |   +-- fixtures/             # Test data (domain allowlists, etc.)
 |   +-- test_helper/          # Shared BATS helpers
-+-- install.sh               # Symlinks bin/* into ~/.local/bin
++-- install.sh               # Installs wrapper scripts for bin/* into ~/.local/bin
 +-- .gitignore
 ```
 

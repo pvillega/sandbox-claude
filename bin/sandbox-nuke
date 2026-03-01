@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sandbox-nuke
-# Destroy ALL agent containers and golden images.
+# Destroy ALL agent containers, golden images, and optionally the OrbStack VM.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "${SCRIPT_DIR}/../lib/sandbox-common.sh"
 
@@ -9,6 +9,22 @@ require_sandbox
 echo "This will destroy ALL agent containers, golden images, and deploy keys."
 read -p "Are you sure? (yes/no): " CONFIRM
 [[ "$CONFIRM" == "yes" ]] || { echo "Aborted"; exit 0; }
+
+# Ensure the OrbStack VM and local keys are always cleaned up, even if
+# container/golden-image cleanup fails midway (set -e from sandbox-common.sh
+# would otherwise abort the script before reaching the final teardown).
+nuke_cleanup() {
+  if [[ -d "${SANDBOX_KEY_DIR}" ]]; then
+    rm -rf "${SANDBOX_KEY_DIR}"
+    info "Cleaned up local deploy keys"
+  fi
+  if [[ "$SANDBOX_PLATFORM" == "macos" ]]; then
+    info "Destroying OrbStack machine '${SANDBOX_MACHINE}'..."
+    orb delete -f "${SANDBOX_MACHINE}" 2>/dev/null || true
+    ok "OrbStack machine destroyed"
+  fi
+}
+trap nuke_cleanup EXIT
 
 # Get list of containers before destroying them
 CONTAINERS=$(vm_exec "incus list -f csv -c n 2>/dev/null | grep '^agent-'" || true)
@@ -46,10 +62,5 @@ vm_exec "
     incus delete \"\$g\" --force
   done
 "
+ok "Containers and golden images destroyed."
 ok "Everything destroyed. Run 'sandbox-setup' to rebuild."
-
-# Clean up any remaining local keys
-if [[ -d "${SANDBOX_KEY_DIR}" ]]; then
-  rm -rf "${SANDBOX_KEY_DIR}"
-  info "Cleaned up local deploy keys"
-fi

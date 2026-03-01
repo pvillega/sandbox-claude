@@ -45,7 +45,7 @@ setup() {
 @test "sandbox-expose: adds iptables FORWARD rule" {
   local container_ip
   container_ip=$(get_container_ip)
-  run vm_exec "sudo iptables -S FORWARD 2>/dev/null | grep '\\-s ${container_ip}/32.*dport 5432'"
+  run vm_exec "iptables -S FORWARD 2>/dev/null | grep '\\-s ${container_ip}/32.*dport 5432'"
   assert_success
 }
 

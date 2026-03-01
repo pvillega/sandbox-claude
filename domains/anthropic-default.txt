@@ -41,7 +41,6 @@ hub.docker.com
 www.docker.com
 production.cloudflare.docker.com
 download.docker.com
-gcr.io
 .gcr.io
 ghcr.io
 mcr.microsoft.com
@@ -53,9 +52,6 @@ cloud.google.com
 accounts.google.com
 gcloud.google.com
 .googleapis.com
-storage.googleapis.com
-compute.googleapis.com
-container.googleapis.com
 azure.com
 portal.azure.com
 microsoft.com
@@ -184,10 +180,6 @@ unison.cloud
 www.unison.cloud
 
 # ── Linux Distributions ──────────────────────────────────────────
-archive.ubuntu.com
-security.ubuntu.com
-ubuntu.com
-www.ubuntu.com
 .ubuntu.com
 ppa.launchpad.net
 launchpad.net
@@ -230,16 +222,12 @@ www.nodejs.org
 statsig.com
 www.statsig.com
 api.statsig.com
-sentry.io
 .sentry.io
-http-intake.logs.datadoghq.com
 .datadoghq.com
 .datadoghq.eu
 
 # ── Content Delivery & Mirrors ────────────────────────────────────
-sourceforge.net
 .sourceforge.net
-packagecloud.io
 .packagecloud.io
 
 # ── Schema & Configuration ───────────────────────────────────────

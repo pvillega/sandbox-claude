@@ -37,7 +37,7 @@ build_session_cmd() {
 
   local exec_prefix
   if [[ "$SANDBOX_PLATFORM" == "macos" ]]; then
-    exec_prefix="orb run -m ${SANDBOX_MACHINE}"
+    exec_prefix="orb run -m ${SANDBOX_MACHINE} sudo"
   else
     exec_prefix=""
   fi

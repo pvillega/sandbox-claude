@@ -51,6 +51,10 @@ if command -v incus &>/dev/null; then
   exit 0
 fi
 
+apt-get update
+apt-get install -y gnupg curl
+mkdir -p /etc/apt/keyrings
+
 curl -fsSL https://pkgs.zabbly.com/key.asc | gpg --dearmor -o /etc/apt/keyrings/zabbly.gpg
 cat > /etc/apt/sources.list.d/zabbly-incus.list << EOF
 deb [signed-by=/etc/apt/keyrings/zabbly.gpg] https://pkgs.zabbly.com/incus/stable $(. /etc/os-release && echo $VERSION_CODENAME) main
@@ -107,7 +111,7 @@ ok "Container isolation active (port_isolation + ipv4/ipv6 filtering)"
 echo ""
 info "Step 4: Applying egress filtering rules..."
 _OIFACE="${OUTBOUND_IFACE}"
-vm_run sudo bash << EGRESS
+vm_run bash << EGRESS
 set -e
 
 if iptables -L FORWARD -n 2>/dev/null | grep -q "incusbr0.*DROP"; then
@@ -144,7 +148,7 @@ echo ""
 info "Step 5: Installing domain filtering proxy (Squid)..."
 ensure_squid_installed
 deploy_squid_config
-vm_exec "sudo systemctl enable squid 2>/dev/null && sudo systemctl start squid 2>/dev/null || sudo systemctl restart squid 2>/dev/null || true"
+vm_exec "systemctl enable squid 2>/dev/null && systemctl start squid 2>/dev/null || systemctl restart squid 2>/dev/null || true"
 ok "Squid proxy ready (idle — no traffic until --restrict-domains is used)"
 
 # ── Step 5: Build golden images ────────────────────────────────────

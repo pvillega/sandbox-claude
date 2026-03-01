@@ -31,7 +31,7 @@ apply_domain_filtering() {
 
   setup_container_domain_filter "$container" "$resolved_file" "$container_ip"
   redirect_container_to_squid "$container_ip"
-  vm_exec "sudo iptables -I FORWARD -s '${container_ip}' -o '${OUTBOUND_IFACE}' -p udp --dport 443 -j DROP"
+  vm_exec "iptables -I FORWARD -s '${container_ip}' -o '${OUTBOUND_IFACE}' -p udp --dport 443 -j DROP"
 
   ok "Domain filtering active (${resolved_name})"
 }

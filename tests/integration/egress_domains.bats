@@ -64,7 +64,7 @@ setup() {
   # returns success (UDP is connectionless — dropped packets don't cause send errors).
   local container_ip
   container_ip=$(get_container_ip)
-  run vm_exec "sudo iptables -S FORWARD 2>/dev/null | grep -q '\\-s ${container_ip}/32.*udp.*dport 443.*DROP'"
+  run vm_exec "iptables -S FORWARD 2>/dev/null | grep -q '\\-s ${container_ip}/32.*udp.*dport 443.*DROP'"
   assert_success
 }
 

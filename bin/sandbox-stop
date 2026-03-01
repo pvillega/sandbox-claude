@@ -8,7 +8,7 @@ NAME="${1:?Usage: sandbox-stop <name> [--rm]}"
 REMOVE="${2:-}"
 CONTAINER=$(container_name "$NAME")
 
-require_sandbox
+require_vm
 
 # Verify container exists
 require_container "$CONTAINER"

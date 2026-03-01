@@ -41,10 +41,6 @@ done
 [[ -n "$NAME" ]] || die "Usage: sandbox-expose <name> <port> [protocol] [--host-port <N>]"
 [[ -n "$PORT" ]] || die "Port number required"
 
-CONTAINER=$(container_name "$NAME")
-
-require_sandbox
-
 # Validate port is a number
 [[ "$PORT" =~ ^[0-9]+$ ]] || die "Port must be a number, got: $PORT"
 
@@ -53,6 +49,10 @@ case "$PROTO" in
   tcp|udp|both) ;;
   *) die "Protocol must be tcp, udp, or both — got: $PROTO" ;;
 esac
+
+CONTAINER=$(container_name "$NAME")
+
+require_sandbox
 
 # Verify container exists
 require_container "$CONTAINER"
