@@ -1,4 +1,4 @@
-# Sandbox Claude Code
+# Sandbox For Claude Code
 
 Run Claude Code agents in fully isolated Incus containers on **macOS** (via OrbStack VM) or **native Linux**. Enable YOLO mode with confidence -- your host filesystem, credentials, and network stay untouched. Each container gets its own filesystem, Docker daemon, workspace, dedicated SSH deploy key, bidirectional port forwarding, and egress filtering.
 
