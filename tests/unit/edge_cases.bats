@@ -1,10 +1,9 @@
 #!/usr/bin/env bats
 load '../test_helper/common'
 
-@test "container_name: empty string produces 'agent-'" {
+@test "container_name: empty string is rejected" {
   run container_name ""
-  assert_success
-  assert_output "agent-"
+  assert_failure
 }
 
 @test "container_name: name with dots" {
@@ -38,15 +37,13 @@ load '../test_helper/common'
 # comment three
 EOF
   run parse_domains_file "${TEST_TMPDIR}/comments-only.txt"
-  # grep -v returns exit 1 when no lines match — document this behaviour
-  assert_failure
+  assert_success
   assert_output ""
 }
 
 @test "parse_domains_file: empty file produces empty output" {
   touch "${TEST_TMPDIR}/empty.txt"
   run parse_domains_file "${TEST_TMPDIR}/empty.txt"
-  # grep returns exit 1 on empty input — document this behaviour
-  assert_failure
+  assert_success
   assert_output ""
 }

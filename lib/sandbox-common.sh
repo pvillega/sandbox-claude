@@ -68,13 +68,11 @@ require_vm() {
 }
 
 require_sandbox() {
+  require_vm
   if [[ "$SANDBOX_PLATFORM" == "macos" ]]; then
-    require_vm
     orb list 2>/dev/null | grep -q "${SANDBOX_MACHINE}" \
       || die "Sandbox machine not found. Run 'sandbox-setup' first."
   else
-    require_vm
-    # On Linux, just verify Incus is initialized (has a default profile)
     incus profile show default &>/dev/null 2>&1 \
       || die "Incus not initialized. Run 'sandbox-setup' first."
   fi
@@ -92,6 +90,12 @@ require_golden() {
     || die "Golden image '${golden_name}' not found. Run 'sandbox-setup' first."
   vm_exec "incus snapshot list ${golden_name} -f csv 2>/dev/null | grep -q ready" \
     || die "Golden image '${golden_name}' has no 'ready' snapshot. Run 'sandbox-setup' first."
+}
+
+require_container() {
+  local container="$1"
+  vm_exec "incus info ${container} &>/dev/null" 2>/dev/null \
+    || die "Container '${container}' not found"
 }
 
 # ── VM execution abstraction ──────────────────────────────────────
@@ -115,7 +119,25 @@ vm_exec() {
 
 # ── Container naming ───────────────────────────────────────────────
 container_name() {
-  echo "agent-${1}"
+  local name="$1"
+  if [[ -z "$name" || ! "$name" =~ ^[a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?$ ]]; then
+    echo "Invalid container name: '${name}'. Use only alphanumeric, hyphens, dots, underscores." >&2
+    return 1
+  fi
+  echo "agent-${name}"
+}
+
+# Wait up to 30s for a container's eth0 to get an IPv4 address
+wait_for_container_networking() {
+  local container="$1"
+  local attempts=0
+  while ! vm_exec "incus exec ${container} -- ip addr show eth0 2>/dev/null | grep -q 'inet '" 2>/dev/null; do
+    attempts=$((attempts + 1))
+    if (( attempts > 30 )); then
+      die "Timed out waiting for container networking"
+    fi
+    sleep 1
+  done
 }
 
 # ── Slot management ────────────────────────────────────────────────
@@ -124,6 +146,12 @@ ssh_port()  { echo $(( 2200 + $1 )); }
 app_port()  { echo $(( 8000 + $1 )); }
 alt_port()  { echo $(( 9000 + $1 )); }
 exposed_host_port() { echo $(( $1 + $2 )); }
+
+# Get the IPv4 address of a container. Returns empty string if not found.
+get_container_ip() {
+  local container="$1"
+  vm_exec "incus list ${container} -f csv -c 4 2>/dev/null | grep -oE '10\.[0-9]+\.[0-9]+\.[0-9]+' | head -1" || true
+}
 
 # Check if a host port is already in use by another container's proxy device.
 # Returns the conflicting container name, or empty string if no conflict.
@@ -176,7 +204,7 @@ validate_slot() {
   local used
   used=$(used_slots)
   if echo "$used" | grep -qx "$slot"; then
-    die "Slot $slot is already in use. Used slots: $(echo $used | tr '\n' ' ')"
+    die "Slot $slot is already in use. Used slots: $(echo "$used" | tr '\n' ' ')"
   fi
 }
 
@@ -262,7 +290,7 @@ chmod 600 ${SANDBOX_USER_HOME}/.ssh/config
 chown ${SANDBOX_UID}:${SANDBOX_GID} ${SANDBOX_USER_HOME}/.ssh/config'"
 
   # Start SSH agent inside the container (as root, then make socket accessible to ubuntu)
-  vm_exec "incus exec ${container} -- bash -c 'eval \$(ssh-agent -a /run/ssh-agent.sock) && echo \$SSH_AGENT_PID > /run/ssh-agent.pid && chmod 777 /run/ssh-agent.sock && ssh-add ${SANDBOX_USER_HOME}/.ssh/deploy-key'"
+  vm_exec "incus exec ${container} -- bash -c 'eval \$(ssh-agent -a /run/ssh-agent.sock) && echo \$SSH_AGENT_PID > /run/ssh-agent.pid && chmod 660 /run/ssh-agent.sock && chown root:${SANDBOX_GID} /run/ssh-agent.sock && ssh-add ${SANDBOX_USER_HOME}/.ssh/deploy-key'"
 
   # Set SSH_AUTH_SOCK in ubuntu user's bashrc
   vm_exec "
@@ -298,7 +326,8 @@ ssh_agent_restart() {
   vm_exec "incus exec ${container} -- bash -c '
     eval \$(ssh-agent -a /run/ssh-agent.sock)
     echo \$SSH_AGENT_PID > /run/ssh-agent.pid
-    chmod 777 /run/ssh-agent.sock
+    chmod 660 /run/ssh-agent.sock
+    chown root:${SANDBOX_GID} /run/ssh-agent.sock
     ssh-add ${SANDBOX_USER_HOME}/.ssh/deploy-key
   '"
 }
@@ -307,39 +336,39 @@ ssh_agent_restart() {
 inject_env() {
   local container="$1"
   shift
-  # Extra --env KEY=VALUE pairs passed as remaining args
   local extra_envs=("$@")
 
   # Read ~/.sandbox/env if it exists
   local env_lines=()
   if [[ -f "${SANDBOX_ENV_FILE}" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
-      # Skip comments and empty lines
-      [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+      # Skip comments (including indented) and empty lines
+      [[ "$line" =~ ^[[:space:]]*# || -z "${line// }" ]] && continue
       env_lines+=("$line")
     done < "${SANDBOX_ENV_FILE}"
   fi
 
   # Add extra env overrides
-  for e in "${extra_envs[@]}"; do
-    env_lines+=("$e")
-  done
+  if [[ ${#extra_envs[@]} -gt 0 ]]; then
+    for e in "${extra_envs[@]}"; do
+      env_lines+=("$e")
+    done
+  fi
 
   # Inject into /etc/profile.d so env vars are available to all login shells
-  # (bash -lc, ssh sessions, etc.) regardless of which user runs the shell.
   if [[ ${#env_lines[@]} -gt 0 ]]; then
-    local export_block=""
+    local tmpfile
+    tmpfile=$(mktemp)
     for line in "${env_lines[@]}"; do
-      # Ensure each line is an export statement
       if [[ "$line" != export\ * ]]; then
-        export_block+="export ${line}\n"
+        printf 'export %s\n' "$line" >> "$tmpfile"
       else
-        export_block+="${line}\n"
+        printf '%s\n' "$line" >> "$tmpfile"
       fi
     done
-    vm_exec "
-      incus exec ${container} -- bash -c 'echo -e \"${export_block}\" >> /etc/profile.d/sandbox-env.sh'
-    "
+    # Push the file directly — no shell interpolation of values
+    vm_run incus file push "$tmpfile" "${container}/etc/profile.d/sandbox-env.sh" --append
+    rm -f "$tmpfile"
   fi
 }
 
@@ -347,12 +376,12 @@ inject_env() {
 # Store metadata in Incus config user.* keys for later retrieval
 set_metadata() {
   local container="$1" key="$2" value="$3"
-  vm_exec "incus config set ${container} user.sandbox.${key}='${value}'"
+  vm_run incus config set "$container" "user.sandbox.${key}" "$value"
 }
 
 get_metadata() {
   local container="$1" key="$2"
-  vm_exec "incus config get ${container} user.sandbox.${key} 2>/dev/null" || true
+  vm_run incus config get "$container" "user.sandbox.${key}" 2>/dev/null || true
 }
 
 # ── Domain-based egress filtering (Squid proxy) ──────────────────
@@ -375,7 +404,7 @@ resolve_domains_file() {
 # Parse a domains file: strip comments and blank lines, output clean domain list
 parse_domains_file() {
   local file="$1"
-  grep -v '^\s*#' "$file" | grep -v '^\s*$' | sed 's/\s*#.*//' | sed 's/^[[:space:]]*//' | sed 's/[[:space:]]*$//'
+  sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$/d' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$file" || true
 }
 
 # Install squid-openssl in the VM if not present
@@ -523,6 +552,16 @@ remove_container_squid_redirect() {
   vm_exec "
     sudo iptables -t nat -S PREROUTING 2>/dev/null | grep '${container_ip}' | while read -r rule; do
       sudo iptables -t nat \$(echo \"\$rule\" | sed 's/^-A/-D/')
+    done
+  " 2>/dev/null || true
+}
+
+# Remove per-container FORWARD iptables rules
+cleanup_container_forward_rules() {
+  local container_ip="$1"
+  vm_exec "
+    sudo iptables -S FORWARD 2>/dev/null | grep '${container_ip}' | while read -r rule; do
+      sudo iptables \$(echo \"\$rule\" | sed 's/^-A/-D/')
     done
   " 2>/dev/null || true
 }

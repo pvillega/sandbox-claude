@@ -55,8 +55,7 @@ case "$PROTO" in
 esac
 
 # Verify container exists
-vm_exec "incus info ${CONTAINER} &>/dev/null" 2>/dev/null \
-  || die "Container '${CONTAINER}' not found"
+require_container "$CONTAINER"
 
 # ── Slot-based host port computation ─────────────────────────────
 SLOT=$(get_metadata "$CONTAINER" "slot")
@@ -111,11 +110,9 @@ add_port() {
   "
 }
 
-case "$PROTO" in
-  tcp)  add_port tcp ;;
-  udp)  add_port udp ;;
-  both) add_port tcp; add_port udp ;;
-esac
+for p in "${proto_list[@]}"; do
+  add_port "$p"
+done
 
 if [[ "$HOST_PORT" != "$PORT" ]]; then
   ok "Exposed host:${HOST_PORT} → ${CONTAINER}:${PORT} bidirectionally (${PROTO})"

@@ -19,7 +19,7 @@ CMD=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --claude) MODE="claude"; shift ;;
-    --cmd)    MODE="cmd"; CMD="$2"; shift 2 ;;
+    --cmd)    [[ -n "${2:-}" ]] || die "--cmd requires a value"; MODE="cmd"; CMD="$2"; shift 2 ;;
     --*)      die "Unknown flag: $1" ;;
     *)        NAMES+=("$1"); shift ;;
   esac
@@ -61,10 +61,8 @@ build_session_cmd() {
 # ── Validate all containers exist and are running ───────────────────
 for name in "${NAMES[@]}"; do
   container=$(container_name "$name")
+  require_container "$container"
   state=$(vm_exec "incus info ${container} 2>/dev/null | grep 'Status:' | awk '{print \$2}'" || true)
-  if [[ -z "$state" ]]; then
-    die "Container '${container}' not found"
-  fi
   if [[ "$state" != "RUNNING" ]]; then
     die "Container '${container}' is ${state}, not running. Run 'sandbox-start ${name}' to restart it."
   fi

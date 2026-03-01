@@ -29,16 +29,10 @@ for container in $CONTAINERS; do
   fi
 
   # Clean up egress rules (FORWARD + NAT)
-  container_ip=$(vm_exec "
-    incus list ${container} -f csv -c 4 2>/dev/null | grep -oE '10\.[0-9]+\.[0-9]+\.[0-9]+' | head -1
-  " || true)
+  container_ip=$(get_container_ip "$container")
   if [[ -n "$container_ip" ]]; then
     remove_container_squid_redirect "$container_ip"
-    vm_exec "
-      iptables -S FORWARD 2>/dev/null | grep '${container_ip}' | while read -r rule; do
-        iptables \$(echo \"\$rule\" | sed 's/^-A/-D/')
-      done
-    " 2>/dev/null || true
+    cleanup_container_forward_rules "$container_ip"
   fi
 
   info "Destroying ${container}..."

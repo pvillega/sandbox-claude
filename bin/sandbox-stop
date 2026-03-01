@@ -11,8 +11,7 @@ CONTAINER=$(container_name "$NAME")
 require_sandbox
 
 # Verify container exists
-vm_exec "incus info ${CONTAINER} &>/dev/null" 2>/dev/null \
-  || die "Container '${CONTAINER}' not found"
+require_container "$CONTAINER"
 
 # Clean up SSH agent
 info "Cleaning up SSH agent..."
@@ -23,16 +22,10 @@ cleanup_container_domain_filter "$CONTAINER"
 
 # Clean up per-container egress rules
 info "Cleaning up egress rules..."
-CONTAINER_IP=$(vm_exec "
-  incus list ${CONTAINER} -f csv -c 4 2>/dev/null | grep -oE '10\.[0-9]+\.[0-9]+\.[0-9]+' | head -1
-" || true)
+CONTAINER_IP=$(get_container_ip "$CONTAINER")
 if [[ -n "$CONTAINER_IP" ]]; then
   remove_container_squid_redirect "$CONTAINER_IP"
-  vm_exec "
-    sudo iptables -S FORWARD 2>/dev/null | grep '${CONTAINER_IP}' | while read -r rule; do
-      sudo iptables \$(echo \"\$rule\" | sed 's/^-A/-D/')
-    done
-  " 2>/dev/null || true
+  cleanup_container_forward_rules "$CONTAINER_IP"
 fi
 
 # Remove stale SSH host key to prevent MitmPortForwardingDisabled on restart

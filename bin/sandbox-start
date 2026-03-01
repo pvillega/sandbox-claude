@@ -18,18 +18,65 @@ EXTRA_ENVS=()
 RESTRICT_DOMAINS=""
 DOMAINS_FILE=""
 
+# ── Helpers ──────────────────────────────────────────────────────
+apply_domain_filtering() {
+  local container="$1" domains_file="$2"
+  local resolved_file resolved_name container_ip
+
+  resolved_file=$(resolve_domains_file "$domains_file")
+  resolved_name=$(basename "$resolved_file")
+
+  container_ip=$(get_container_ip "$container")
+  [[ -n "$container_ip" ]] || die "Could not determine container IP for domain filtering"
+
+  setup_container_domain_filter "$container" "$resolved_file" "$container_ip"
+  redirect_container_to_squid "$container_ip"
+  vm_exec "sudo iptables -I FORWARD -s '${container_ip}' -o '${OUTBOUND_IFACE}' -p udp --dport 443 -j DROP"
+
+  ok "Domain filtering active (${resolved_name})"
+}
+
+print_connection_summary() {
+  local container="$1" name="$2" status_word="$3"
+  local slot stack_name ssh_p app_p alt_p
+
+  slot=$(get_metadata "$container" "slot")
+  stack_name=$(get_metadata "$container" "stack")
+  ssh_p=$(ssh_port "$slot")
+  app_p=$(app_port "$slot")
+  alt_p=$(alt_port "$slot")
+
+  echo ""
+  ok "=== '${container}' ${status_word} ==="
+  echo ""
+  echo "  Slot:      ${slot}"
+  echo "  Stack:     ${stack_name:-unknown}"
+  if [[ "$(get_metadata "$container" "restrict-domains")" == "yes" ]]; then
+    echo "  Domains:   RESTRICTED"
+  else
+    echo "  Domains:   open (all HTTPS allowed)"
+  fi
+  echo "  SSH:       ssh -o StrictHostKeyChecking=no -p ${ssh_p} ubuntu@localhost"
+  echo "  VS Code:   code --remote ssh-remote+ubuntu@localhost:${ssh_p} ${WORKSPACE_DIR}"
+  echo "  App:       http://localhost:${app_p}"
+  echo "  Alt:       http://localhost:${alt_p}"
+  echo ""
+  echo "  Shell:     sandbox ${name}"
+  echo "  Claude:    sandbox ${name} --claude"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --stack)            STACK="$2"; shift 2 ;;
-    --branch)           BRANCH="$2"; shift 2 ;;
-    --from)             FROM="$2"; shift 2 ;;
-    --ssh-key)          SSH_KEY="$2"; shift 2 ;;
-    --slot)             SLOT="$2"; shift 2 ;;
-    --cpu)              CPU="$2"; shift 2 ;;
-    --memory)           MEMORY="$2"; shift 2 ;;
-    --env)              EXTRA_ENVS+=("$2"); shift 2 ;;
+    --stack)            [[ -n "${2:-}" ]] || die "--stack requires a value"; STACK="$2"; shift 2 ;;
+    --branch)           [[ -n "${2:-}" ]] || die "--branch requires a value"; BRANCH="$2"; shift 2 ;;
+    --from)             [[ -n "${2:-}" ]] || die "--from requires a value"; FROM="$2"; shift 2 ;;
+    --ssh-key)          [[ -n "${2:-}" ]] || die "--ssh-key requires a value"; SSH_KEY="$2"; shift 2 ;;
+    --slot)             [[ -n "${2:-}" ]] || die "--slot requires a value"; SLOT="$2"; shift 2 ;;
+    --cpu)              [[ -n "${2:-}" ]] || die "--cpu requires a value"; CPU="$2"; shift 2 ;;
+    --memory)           [[ -n "${2:-}" ]] || die "--memory requires a value"; MEMORY="$2"; shift 2 ;;
+    --env)              [[ -n "${2:-}" ]] || die "--env requires a value"; EXTRA_ENVS+=("$2"); shift 2 ;;
     --restrict-domains) RESTRICT_DOMAINS="yes"; shift ;;
-    --domains-file)     RESTRICT_DOMAINS="yes"; DOMAINS_FILE="$2"; shift 2 ;;
+    --domains-file)     [[ -n "${2:-}" ]] || die "--domains-file requires a value"; RESTRICT_DOMAINS="yes"; DOMAINS_FILE="$2"; shift 2 ;;
     --*)                die "Unknown flag: $1" ;;
     *)
       if [[ -z "$NAME" ]]; then
@@ -78,14 +125,7 @@ if [[ "$CONTAINER_STATE" == "STOPPED" ]]; then
   vm_exec "incus start ${CONTAINER}"
 
   # Wait for networking
-  local_attempts=0
-  while ! vm_exec "incus exec ${CONTAINER} -- ip addr show eth0 2>/dev/null | grep -q 'inet '" 2>/dev/null; do
-    local_attempts=$((local_attempts + 1))
-    if (( local_attempts > 30 )); then
-      die "Timed out waiting for container networking"
-    fi
-    sleep 1
-  done
+  wait_for_container_networking "$CONTAINER"
 
   # Ensure workspace directory exists (may be missing in containers from old golden images)
   vm_exec "incus exec ${CONTAINER} -- bash -c 'mkdir -p ${WORKSPACE_DIR} && chown ${SANDBOX_UID}:${SANDBOX_GID} ${WORKSPACE_DIR}'"
@@ -103,7 +143,7 @@ if [[ "$CONTAINER_STATE" == "STOPPED" ]]; then
   # Inject extra env vars (appends new ones to bashrc)
   if [[ ${#EXTRA_ENVS[@]} -gt 0 ]]; then
     info "Injecting environment variables..."
-    inject_env "$CONTAINER" "${EXTRA_ENVS[@]}"
+    inject_env "$CONTAINER" ${EXTRA_ENVS[@]+"${EXTRA_ENVS[@]}"}
   fi
 
   # Handle --ssh-key: replace deploy key in container and update SSH config
@@ -121,71 +161,19 @@ if [[ "$CONTAINER_STATE" == "STOPPED" ]]; then
   # Handle domain filtering updates
   if [[ "$RESTRICT_DOMAINS" == "yes" ]]; then
     info "Applying domain-based egress filtering..."
-    RESOLVED_DOMAINS_FILE=$(resolve_domains_file "$DOMAINS_FILE")
-    RESOLVED_DOMAINS_NAME=$(basename "$RESOLVED_DOMAINS_FILE")
-
-    CONTAINER_IP=$(vm_exec "
-      incus list ${CONTAINER} -f csv -c 4 2>/dev/null | grep -oE '10\.[0-9]+\.[0-9]+\.[0-9]+' | head -1
-    ")
-    [[ -n "$CONTAINER_IP" ]] || die "Could not determine container IP for domain filtering"
-
-    setup_container_domain_filter "$CONTAINER" "$RESOLVED_DOMAINS_FILE" "$CONTAINER_IP"
-    redirect_container_to_squid "$CONTAINER_IP"
-
-    # Block UDP 443 for this container (prevent QUIC bypass)
-    vm_exec "sudo iptables -I FORWARD -s '${CONTAINER_IP}' -o '${OUTBOUND_IFACE}' -p udp --dport 443 -j DROP"
-
-    # Update metadata
+    apply_domain_filtering "$CONTAINER" "$DOMAINS_FILE"
     set_metadata "$CONTAINER" "restrict-domains" "yes"
     [[ -n "$DOMAINS_FILE" ]] && set_metadata "$CONTAINER" "domains-file" "$DOMAINS_FILE"
-
-    ok "Domain filtering active (${RESOLVED_DOMAINS_NAME})"
   else
-    # Re-apply existing domain filtering from metadata if previously configured
     EXISTING_RESTRICT=$(get_metadata "$CONTAINER" "restrict-domains")
     if [[ "$EXISTING_RESTRICT" == "yes" ]]; then
       info "Re-applying domain filtering from saved configuration..."
       EXISTING_DOMAINS_FILE=$(get_metadata "$CONTAINER" "domains-file")
-      RESOLVED_DOMAINS_FILE=$(resolve_domains_file "$EXISTING_DOMAINS_FILE")
-      RESOLVED_DOMAINS_NAME=$(basename "$RESOLVED_DOMAINS_FILE")
-
-      CONTAINER_IP=$(vm_exec "
-        incus list ${CONTAINER} -f csv -c 4 2>/dev/null | grep -oE '10\.[0-9]+\.[0-9]+\.[0-9]+' | head -1
-      ")
-      [[ -n "$CONTAINER_IP" ]] || die "Could not determine container IP for domain filtering"
-
-      setup_container_domain_filter "$CONTAINER" "$RESOLVED_DOMAINS_FILE" "$CONTAINER_IP"
-      redirect_container_to_squid "$CONTAINER_IP"
-      vm_exec "sudo iptables -I FORWARD -s '${CONTAINER_IP}' -o '${OUTBOUND_IFACE}' -p udp --dport 443 -j DROP"
-
-      ok "Domain filtering re-applied (${RESOLVED_DOMAINS_NAME})"
+      apply_domain_filtering "$CONTAINER" "$EXISTING_DOMAINS_FILE"
     fi
   fi
 
-  # Retrieve slot for connection summary
-  SLOT=$(get_metadata "$CONTAINER" "slot")
-  STACK_NAME=$(get_metadata "$CONTAINER" "stack")
-  SSH_P=$(ssh_port "$SLOT")
-  APP_P=$(app_port "$SLOT")
-  ALT_P=$(alt_port "$SLOT")
-
-  echo ""
-  ok "=== '${CONTAINER}' restarted ==="
-  echo ""
-  echo "  Slot:      ${SLOT}"
-  echo "  Stack:     ${STACK_NAME:-unknown}"
-  if [[ "$(get_metadata "$CONTAINER" "restrict-domains")" == "yes" ]]; then
-    echo "  Domains:   RESTRICTED"
-  else
-    echo "  Domains:   open (all HTTPS allowed)"
-  fi
-  echo "  SSH:       ssh -o StrictHostKeyChecking=no -p ${SSH_P} ubuntu@localhost"
-  echo "  VS Code:   code --remote ssh-remote+ubuntu@localhost:${SSH_P} ${WORKSPACE_DIR}"
-  echo "  App:       http://localhost:${APP_P}"
-  echo "  Alt:       http://localhost:${ALT_P}"
-  echo ""
-  echo "  Shell:     sandbox ${NAME}"
-  echo "  Claude:    sandbox ${NAME} --claude"
+  print_connection_summary "$CONTAINER" "$NAME" "restarted"
   exit 0
 fi
 
@@ -318,26 +306,12 @@ if [[ -n "$KEY_PATH" ]]; then
 fi
 
 # ── Env vars ────────────────────────────────────────────────────────
-inject_env "$CONTAINER" "${EXTRA_ENVS[@]}"
+inject_env "$CONTAINER" ${EXTRA_ENVS[@]+"${EXTRA_ENVS[@]}"}
 
 # ── Domain filtering ───────────────────────────────────────────────
 if [[ "$RESTRICT_DOMAINS" == "yes" ]]; then
   info "Applying domain-based egress filtering..."
-  RESOLVED_DOMAINS_FILE=$(resolve_domains_file "$DOMAINS_FILE")
-  RESOLVED_DOMAINS_NAME=$(basename "$RESOLVED_DOMAINS_FILE")
-
-  CONTAINER_IP=$(vm_exec "
-    incus list ${CONTAINER} -f csv -c 4 2>/dev/null | grep -oE '10\.[0-9]+\.[0-9]+\.[0-9]+' | head -1
-  ")
-  [[ -n "$CONTAINER_IP" ]] || die "Could not determine container IP for domain filtering"
-
-  setup_container_domain_filter "$CONTAINER" "$RESOLVED_DOMAINS_FILE" "$CONTAINER_IP"
-  redirect_container_to_squid "$CONTAINER_IP"
-
-  # Block UDP 443 for this container (prevent QUIC bypass)
-  vm_exec "sudo iptables -I FORWARD -s '${CONTAINER_IP}' -o '${OUTBOUND_IFACE}' -p udp --dport 443 -j DROP"
-
-  ok "Domain filtering active (${RESOLVED_DOMAINS_NAME})"
+  apply_domain_filtering "$CONTAINER" "$DOMAINS_FILE"
 fi
 
 # ── Store metadata ──────────────────────────────────────────────────
@@ -370,20 +344,4 @@ if [[ -z "$REPO" ]]; then
 fi
 
 # ── Done ────────────────────────────────────────────────────────────
-echo ""
-ok "=== '${CONTAINER}' ready ==="
-echo ""
-echo "  Slot:      ${SLOT}"
-echo "  Stack:     ${STACK}"
-if [[ "$RESTRICT_DOMAINS" == "yes" ]]; then
-  echo "  Domains:   RESTRICTED (${RESOLVED_DOMAINS_NAME:-default})"
-else
-  echo "  Domains:   open (all HTTPS allowed)"
-fi
-echo "  SSH:       ssh -o StrictHostKeyChecking=no -p ${SSH_P} ubuntu@localhost"
-echo "  VS Code:   code --remote ssh-remote+ubuntu@localhost:${SSH_P} ${WORKSPACE_DIR}"
-echo "  App:       http://localhost:${APP_P}"
-echo "  Alt:       http://localhost:${ALT_P}"
-echo ""
-echo "  Shell:     sandbox ${NAME}"
-echo "  Claude:    sandbox ${NAME} --claude"
+print_connection_summary "$CONTAINER" "$NAME" "ready"
