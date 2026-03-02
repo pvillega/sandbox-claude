@@ -20,7 +20,7 @@ Run Claude Code agents in fully isolated Incus containers on **macOS** (via OrbS
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/you/sandbox-claude.git
+git clone https://github.com/pvillega/sandbox-claude.git
 cd sandbox-claude
 ./install.sh                # Installs wrapper scripts for bin/* into ~/.local/bin
 
@@ -32,7 +32,7 @@ sandbox-setup               # Takes ~10 minutes the first time
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/you/sandbox-claude.git
+git clone https://github.com/pvillega/sandbox-claude.git
 cd sandbox-claude
 ./install.sh                # Installs wrapper scripts for bin/* into ~/.local/bin
 
