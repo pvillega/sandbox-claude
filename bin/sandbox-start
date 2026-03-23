@@ -95,6 +95,7 @@ done
 
 # ── Check for existing container (restart-or-create) ──────────────
 require_sandbox
+vm_exec "modprobe br_netfilter 2>/dev/null || true"
 CONTAINER=$(container_name "$NAME")
 
 CONTAINER_STATE=""
