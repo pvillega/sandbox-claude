@@ -100,6 +100,7 @@ ok "Incus ready"
 # ── Step 3b: Container network isolation ──────────────────────────
 echo ""
 info "Step 3: Enforcing container network isolation..."
+vm_exec "modprobe br_netfilter"
 vm_exec "
   incus profile device set default eth0 security.port_isolation=true
   incus profile device set default eth0 security.ipv4_filtering=true
